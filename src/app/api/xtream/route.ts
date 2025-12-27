@@ -12,40 +12,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build the Xtream API URL
+    // Build the Xtream API URL as a simple string
     const baseUrl = server.replace(/\/$/, '');
-    const url = new URL(`${baseUrl}/player_api.php`);
-    url.searchParams.set('username', username);
-    url.searchParams.set('password', password);
+    let apiUrl = `${baseUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 
     if (action) {
-      url.searchParams.set('action', action);
+      apiUrl += `&action=${encodeURIComponent(action)}`;
     }
 
     // Add additional params
     if (params && typeof params === 'object') {
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined && value !== null) {
-          url.searchParams.set(key, String(value));
+          apiUrl += `&${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
         }
       }
     }
 
-    const response = await fetch(url.toString(), {
+    console.log('Fetching Xtream URL:', apiUrl.replace(/password=[^&]+/, 'password=***'));
+
+    const response = await fetch(apiUrl, {
+      method: 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+        'Cache-Control': 'no-cache',
       },
     });
 
+    // Get the raw response text first
+    const responseText = await response.text();
+
+    console.log('Xtream response status:', response.status);
+    console.log('Xtream response preview:', responseText.substring(0, 200));
+
     if (!response.ok) {
       return NextResponse.json(
-        { error: `Xtream API error: ${response.status}` },
+        { error: `Xtream API error: ${response.status}`, details: responseText.substring(0, 500) },
         { status: response.status }
       );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
+    // Parse JSON
+    try {
+      const data = JSON.parse(responseText);
+      return NextResponse.json(data);
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON response from Xtream server', details: responseText.substring(0, 500) },
+        { status: 502 }
+      );
+    }
   } catch (error) {
     console.error('Xtream proxy error:', error);
     return NextResponse.json(
