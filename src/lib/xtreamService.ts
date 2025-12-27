@@ -14,49 +14,38 @@ import {
 
 /**
  * Service pour l'API Xtream Code
- * Gère l'authentification et la récupération des contenus
+ * Utilise un proxy API côté serveur pour éviter les problèmes CORS
  */
 
 export class XtreamService {
   private credentials: XtreamCredentials;
-  private baseUrl: string;
   private authData: XtreamAuthResponse | null = null;
 
   constructor(credentials: XtreamCredentials) {
     this.credentials = credentials;
-    this.baseUrl = credentials.server.replace(/\/$/, '');
   }
 
   /**
-   * Construit l'URL de l'API
+   * Effectue une requête via le proxy API
    */
-  private buildApiUrl(action: string, params: Record<string, string> = {}): string {
-    const url = new URL(`${this.baseUrl}/player_api.php`);
-    url.searchParams.set('username', this.credentials.username);
-    url.searchParams.set('password', this.credentials.password);
-    url.searchParams.set('action', action);
-
-    for (const [key, value] of Object.entries(params)) {
-      url.searchParams.set(key, value);
-    }
-
-    return url.toString();
-  }
-
-  /**
-   * Effectue une requête API
-   */
-  private async apiRequest<T>(action: string, params: Record<string, string> = {}): Promise<T> {
-    const url = this.buildApiUrl(action, params);
-
-    const response = await fetch(url, {
+  private async apiRequest<T>(action?: string, params: Record<string, string> = {}): Promise<T> {
+    const response = await fetch('/api/xtream', {
+      method: 'POST',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        server: this.credentials.server,
+        username: this.credentials.username,
+        password: this.credentials.password,
+        action,
+        params,
+      }),
     });
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `API request failed: ${response.status}`);
     }
 
     return response.json();
@@ -66,19 +55,7 @@ export class XtreamService {
    * Authentification et récupération des infos serveur
    */
   async authenticate(): Promise<XtreamAuthResponse> {
-    const url = `${this.baseUrl}/player_api.php?username=${this.credentials.username}&password=${this.credentials.password}`;
-
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Authentication failed: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await this.apiRequest<XtreamAuthResponse>();
 
     if (!data.user_info || data.user_info.auth === 0) {
       throw new Error('Invalid credentials');
@@ -156,21 +133,24 @@ export class XtreamService {
    * Génère l'URL de stream live
    */
   getLiveStreamUrl(streamId: number, format: 'm3u8' | 'ts' = 'm3u8'): string {
-    return `${this.baseUrl}/live/${this.credentials.username}/${this.credentials.password}/${streamId}.${format}`;
+    const baseUrl = this.credentials.server.replace(/\/$/, '');
+    return `${baseUrl}/live/${this.credentials.username}/${this.credentials.password}/${streamId}.${format}`;
   }
 
   /**
    * Génère l'URL de stream VOD
    */
   getVodStreamUrl(streamId: number, extension: string = 'mp4'): string {
-    return `${this.baseUrl}/movie/${this.credentials.username}/${this.credentials.password}/${streamId}.${extension}`;
+    const baseUrl = this.credentials.server.replace(/\/$/, '');
+    return `${baseUrl}/movie/${this.credentials.username}/${this.credentials.password}/${streamId}.${extension}`;
   }
 
   /**
    * Génère l'URL d'épisode de série
    */
   getSeriesEpisodeUrl(episodeId: string, extension: string = 'mp4'): string {
-    return `${this.baseUrl}/series/${this.credentials.username}/${this.credentials.password}/${episodeId}.${extension}`;
+    const baseUrl = this.credentials.server.replace(/\/$/, '');
+    return `${baseUrl}/series/${this.credentials.username}/${this.credentials.password}/${episodeId}.${extension}`;
   }
 
   /**
