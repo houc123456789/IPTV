@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useCallback } from 'react';
 import { M3UPlaylist, XtreamCredentials } from '@/types/iptv';
-import { parseM3U, loadM3UFromUrl, isValidM3U } from '@/lib/m3uParser';
+import { parseM3U, isValidM3U } from '@/lib/m3uParser';
 import { createXtreamService, parseXtreamUrl } from '@/lib/xtreamService';
 
 type LoaderTab = 'm3u-file' | 'm3u-url' | 'xtream';
@@ -81,7 +81,7 @@ export default function PlaylistLoader({ onPlaylistLoaded, onClose }: PlaylistLo
     [handleFileSelect]
   );
 
-  // Handle URL load
+  // Handle URL load - always fetch as M3U via proxy
   const handleUrlLoad = async () => {
     if (!m3uUrl.trim()) {
       setError('Veuillez entrer une URL');
@@ -92,19 +92,27 @@ export default function PlaylistLoader({ onPlaylistLoaded, onClose }: PlaylistLo
     setIsLoading(true);
 
     try {
-      // Check if it's an Xtream URL
-      const xtreamCreds = parseXtreamUrl(m3uUrl);
-      if (xtreamCreds) {
-        // Use Xtream API
-        const service = createXtreamService(xtreamCreds);
-        await service.authenticate();
-        const playlist = await service.getAllContentAsPlaylist();
-        onPlaylistLoaded(playlist);
-      } else {
-        // Regular M3U URL
-        const playlist = await loadM3UFromUrl(m3uUrl);
-        onPlaylistLoaded(playlist);
+      // Use proxy to fetch M3U content
+      const response = await fetch('/api/m3u', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: m3uUrl }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erreur ${response.status}`);
       }
+
+      const { content } = await response.json();
+
+      if (!isValidM3U(content)) {
+        throw new Error('Le contenu ne semble pas être une playlist M3U valide');
+      }
+
+      const playlist = parseM3U(content);
+      playlist.source = 'url';
+      onPlaylistLoaded(playlist);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur lors du chargement de la playlist');
     } finally {
