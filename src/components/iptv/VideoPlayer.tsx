@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import Hls from 'hls.js';
 import { M3UChannel } from '@/types/iptv';
 
 interface VideoPlayerProps {
@@ -19,7 +20,7 @@ export default function VideoPlayer({
   onPause,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<typeof import('hls.js').default | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -34,25 +35,12 @@ export default function VideoPlayer({
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize HLS.js
-  useEffect(() => {
-    const loadHls = async () => {
-      const Hls = (await import('hls.js')).default;
-      if (Hls.isSupported()) {
-        hlsRef.current = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-          backBufferLength: 90,
-        }) as unknown as typeof import('hls.js').default;
-      }
-    };
-    loadHls();
-
-    return () => {
-      if (hlsRef.current) {
-        (hlsRef.current as { destroy: () => void }).destroy();
-      }
-    };
+  // Cleanup HLS instance
+  const destroyHls = useCallback(() => {
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
   }, []);
 
   // Load channel
@@ -63,61 +51,57 @@ export default function VideoPlayer({
     setIsLoading(true);
     setError(null);
 
+    // Cleanup previous instance
+    destroyHls();
+
     const url = channel.url;
-    const isHls = url.includes('.m3u8') || url.includes('m3u8');
+    const isHlsStream = url.includes('.m3u8') || url.includes('m3u8');
 
-    const loadVideo = async () => {
-      const Hls = (await import('hls.js')).default;
+    if (isHlsStream && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+      });
 
-      if (isHls && Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-        });
+      hls.loadSource(url);
+      hls.attachMedia(video);
 
-        hls.loadSource(url);
-        hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsLoading(false);
+        if (autoPlay) {
+          video.play().catch(() => {});
+        }
+      });
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          setError('Erreur de lecture du flux');
           setIsLoading(false);
-          if (autoPlay) {
-            video.play().catch(() => {});
-          }
-        });
-
-        hls.on(Hls.Events.ERROR, (_event: unknown, data: { fatal?: boolean; type?: string }) => {
-          if (data.fatal) {
-            setError('Erreur de lecture du flux');
-            setIsLoading(false);
-            onError?.('Stream error');
-          }
-        });
-
-        hlsRef.current = hls as unknown as typeof import('hls.js').default;
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari native HLS
-        video.src = url;
-        if (autoPlay) {
-          video.play().catch(() => {});
+          onError?.('Stream error');
         }
-      } else {
-        // Direct video
-        video.src = url;
-        if (autoPlay) {
-          video.play().catch(() => {});
-        }
+      });
+
+      hlsRef.current = hls;
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari native HLS
+      video.src = url;
+      setIsLoading(false);
+      if (autoPlay) {
+        video.play().catch(() => {});
       }
-    };
-
-    loadVideo();
+    } else {
+      // Direct video
+      video.src = url;
+      setIsLoading(false);
+      if (autoPlay) {
+        video.play().catch(() => {});
+      }
+    }
 
     return () => {
-      if (hlsRef.current) {
-        (hlsRef.current as { destroy: () => void }).destroy();
-        hlsRef.current = null;
-      }
+      destroyHls();
     };
-  }, [channel, autoPlay, onError]);
+  }, [channel, autoPlay, onError, destroyHls]);
 
   // Video event handlers
   useEffect(() => {
@@ -194,20 +178,20 @@ export default function VideoPlayer({
   }, [isPlaying]);
 
   // Controls functions
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
     if (isPlaying) {
       videoRef.current.pause();
     } else {
       videoRef.current.play();
     }
-  };
+  }, [isPlaying]);
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     if (!videoRef.current) return;
     videoRef.current.muted = !isMuted;
     setIsMuted(!isMuted);
-  };
+  }, [isMuted]);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseFloat(e.target.value);
@@ -218,7 +202,7 @@ export default function VideoPlayer({
     }
   };
 
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = useCallback(async () => {
     if (!containerRef.current) return;
 
     if (!document.fullscreenElement) {
@@ -226,7 +210,7 @@ export default function VideoPlayer({
     } else {
       await document.exitFullscreen();
     }
-  };
+  }, []);
 
   const formatTime = (time: number): string => {
     if (!isFinite(time)) return '--:--';
@@ -275,7 +259,7 @@ export default function VideoPlayer({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [volume]);
+  }, [volume, togglePlay, toggleFullscreen, toggleMute]);
 
   if (!channel) {
     return (
