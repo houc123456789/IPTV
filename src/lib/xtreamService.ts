@@ -120,7 +120,8 @@ export class XtreamService {
    * Récupère les chaînes live
    */
   async getLiveStreams(categoryId?: string): Promise<XtreamLiveStream[]> {
-    const params = categoryId ? { category_id: categoryId } : {};
+    const params: Record<string, string> = {};
+    if (categoryId) params.category_id = categoryId;
     return this.apiRequest<XtreamLiveStream[]>('get_live_streams', params);
   }
 
@@ -128,7 +129,8 @@ export class XtreamService {
    * Récupère les films VOD
    */
   async getVodStreams(categoryId?: string): Promise<XtreamVodStream[]> {
-    const params = categoryId ? { category_id: categoryId } : {};
+    const params: Record<string, string> = {};
+    if (categoryId) params.category_id = categoryId;
     return this.apiRequest<XtreamVodStream[]>('get_vod_streams', params);
   }
 
@@ -136,7 +138,8 @@ export class XtreamService {
    * Récupère les séries
    */
   async getSeries(categoryId?: string): Promise<XtreamSeriesInfo[]> {
-    const params = categoryId ? { category_id: categoryId } : {};
+    const params: Record<string, string> = {};
+    if (categoryId) params.category_id = categoryId;
     return this.apiRequest<XtreamSeriesInfo[]>('get_series', params);
   }
 
